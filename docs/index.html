@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; worker-src 'none'"
+    />
+    <meta
+      name="description"
+      content="A cooperative scheduler you can inspect one tick at a time. Real bounded work callbacks, four policies, arrival and sleep events, and a live run queue."
+    />
+    <meta name="color-scheme" content="light" />
+    <title>Cadenceq - make the next turn count</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <a class="skip" href="#lab">Skip to scheduler</a>
+    <header>
+      <a class="brand" href="#"
+        ><span class="logo" aria-hidden="true">c<span>q</span></span
+        >cadenceq</a
+      >
+      <nav aria-label="Main">
+        <a href="#rules">The rules</a><a href="#limits">Boundaries</a
+        ><a href="https://github.com/Aditya2375/cadenceq">Source ↗</a>
+      </nav>
+    </header>
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">A STUDY IN SHARED TIME / 024</p>
+          <h1>Everyone gets<br />a <i>next turn.</i></h1>
+          <p class="lead">
+            A small cooperative scheduler. Watch tasks arrive, wait, do actual
+            work, and step aside. Change the policy. See who waits.
+          </p>
+          <a class="hero-link" href="#lab">Open the run queue <span>↓</span></a>
+        </div>
+        <div
+          class="hero-art"
+          aria-label="Illustration: three tasks sharing a worker"
+        >
+          <div class="art-caption">
+            <span>ONE WORKER</span><span>LOGICAL TIME →</span>
+          </div>
+          <div class="art-row">
+            <b>A</b>
+            <div class="art-track">
+              <span class="block a">work</span
+              ><span class="block outline">wait</span
+              ><span class="block a">work</span><span class="dot"></span>
+            </div>
+          </div>
+          <div class="art-row">
+            <b>B</b>
+            <div class="art-track">
+              <span class="block outline">wait</span
+              ><span class="block b">work</span
+              ><span class="block outline">wait</span><span class="dot"></span>
+            </div>
+          </div>
+          <div class="art-row">
+            <b>C</b>
+            <div class="art-track">
+              <span class="block c">sleep</span
+              ><span class="block outline">wait</span
+              ><span class="block c">next</span><span class="dot"></span>
+            </div>
+          </div>
+          <p>One tick. One callback.<br />No race to the finish.</p>
+          <span class="art-index">FIFO / RR / SJF / SRTF</span>
+        </div>
+      </section>
+      <div class="boundary-strip">
+        <span>Actual callback execution</span
+        ><span>Virtual ticks, not CPU milliseconds</span
+        ><span>Single worker · trusted work</span>
+      </div>
+      <section id="lab" tabindex="-1">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">01 / THE SCHEDULER</p>
+            <h2>Make time visible.</h2>
+          </div>
+          <p>
+            This browser runs the work, not just the chart. Each selected unit
+            executes 64 checksum rounds before the clock advances. Native Python
+            accepts your own trusted callbacks.
+          </p>
+        </div>
+        <div class="lab-grid">
+          <aside class="settings">
+            <div class="settings-top">
+              <h3>Workload</h3>
+              <span id="job-count">4 TASKS</span>
+            </div>
+            <label for="preset">Start from a case</label
+            ><select id="preset">
+              <option value="convoy">The convoy</option>
+              <option value="sleep">Sleep &amp; wake</option>
+              <option value="boundary">At the boundary</option>
+              <option value="idle">Late arrivals</option></select
+            ><label for="policy">Dispatch policy</label
+            ><select id="policy">
+              <option value="rr">Round robin (RR)</option>
+              <option value="fcfs">First come, first served</option>
+              <option value="sjf">Shortest job first</option>
+              <option value="srtf">Shortest remaining time</option>
+            </select>
+            <p id="policy-note"></p>
+            <label for="quantum"
+              >Round-robin quantum
+              <span id="quantum-label">2 ticks</span></label
+            ><input id="quantum" type="range" min="1" max="12" value="2" />
+            <div class="editor-head">
+              <span>Task plan</span><button id="add">+ Add task</button>
+            </div>
+            <p class="hint">
+              CPU / sleep / CPU. Odd-length plans, 1..64 per burst. Arrival
+              0..128. Up to 12 tasks. Seed is unsigned 32-bit.
+            </p>
+            <div id="jobs"></div>
+            <button id="apply" class="primary">Apply &amp; reset</button>
+            <p id="error" role="alert"></p>
+            <p id="stale" role="status" hidden>
+              Unapplied edits. The trace below is the previous workload. Apply
+              &amp; reset to continue.
+            </p>
+          </aside>
+          <div class="workspace">
+            <div class="transport">
+              <div>
+                <p class="eyebrow">WORKER / 01</p>
+                <h3 id="phase">Ready to dispatch</h3>
+              </div>
+              <div class="transport-actions">
+                <button id="step">Step</button
+                ><button id="play" class="primary">Play ▶</button
+                ><button id="finish">Finish</button>
+              </div>
+            </div>
+            <p id="live" role="status" aria-live="polite">
+              No work has run yet.
+            </p>
+            <div class="metrics">
+              <div>
+                <span>Logical clock</span><b id="clock">0<span> ticks</span></b>
+              </div>
+              <div>
+                <span>Mean wait / all tasks</span
+                ><b id="wait">0<span> ticks</span></b>
+              </div>
+              <div>
+                <span>Mean turnaround / done</span><b id="turnaround">-</b>
+              </div>
+              <div>
+                <span>Worker busy / elapsed</span
+                ><b id="busy">0<span>%</span></b>
+              </div>
+            </div>
+            <div class="queue-block">
+              <div class="panel-head">
+                <h3>Runnable tasks</h3>
+                <span>current first; ready by policy</span>
+              </div>
+              <div id="queue" aria-label="Ready queue"></div>
+              <p id="sleepers"></p>
+            </div>
+            <div class="timeline-block">
+              <div class="panel-head">
+                <h3>The timeline</h3>
+                <span id="trace-label">No elapsed ticks</span>
+              </div>
+              <p class="hint">
+                Each block is a contiguous span of scheduled work. Click a block
+                to inspect its last tick. Idle is hatched. Scroll the chart on
+                small screens.
+              </p>
+              <div
+                class="timeline-scroll"
+                tabindex="0"
+                aria-label="Scrollable task timeline"
+              >
+                <div id="timeline"></div>
+              </div>
+              <div class="inspector">
+                <span id="inspect-title">Awaiting the first tick</span>
+                <p id="inspect">
+                  Step the scheduler to inspect a scheduling decision.
+                </p>
+              </div>
+            </div>
+            <div class="tasks-head">
+              <h3>Task ledger</h3>
+              <div>
+                <label class="sr" for="cancel-task">Task to cancel</label
+                ><select id="cancel-task"></select
+                ><button id="cancel">Cancel task</button>
+              </div>
+            </div>
+            <div id="ledger"></div>
+          </div>
+        </div>
+      </section>
+      <section id="rules">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">02 / THE CONTRACT</p>
+            <h2>Small rules.<br />Different outcomes.</h2>
+          </div>
+          <p>
+            Scheduling policies trade response for completion. None wins every
+            workload. This model knows the length of the current CPU burst,
+            unlike a general-purpose OS.
+          </p>
+        </div>
+        <div class="rule-grid">
+          <article>
+            <span>01 / FCFS</span>
+            <h3>Keep your place.</h3>
+            <p>
+              The oldest ready task keeps the worker until its current CPU burst
+              ends. New short tasks can wait behind a long one.
+            </p>
+          </article>
+          <article>
+            <span>02 / ROUND ROBIN</span>
+            <h3>Pass it around.</h3>
+            <p>
+              Run for a fixed quantum, then rejoin the queue. Arrivals and
+              wakeups at the exact boundary enter before the expired task.
+            </p>
+          </article>
+          <article>
+            <span>03 / SJF</span>
+            <h3>Short burst first.</h3>
+            <p>
+              Pick the shortest known current CPU burst when the worker becomes
+              free. Do not interrupt a running burst.
+            </p>
+          </article>
+          <article>
+            <span>04 / SRTF</span>
+            <h3>Let a shorter one in.</h3>
+            <p>
+              Reconsider after every callback. A strictly shorter remaining
+              burst can take the next turn. On a tie the current task stays.
+            </p>
+          </article>
+        </div>
+        <div class="event-rule">
+          <b>At each boundary</b>
+          <p>
+            Finish the prior unit → complete or sleep → admit arrivals and
+            wakeups in workload order → requeue an expired RR task. A sleep of 2
+            at clock 3 wakes at 5. Ties use queue-entry order. No context-switch
+            overhead is modeled.
+          </p>
+        </div>
+      </section>
+      <section id="limits" class="limits">
+        <div>
+          <p class="eyebrow">03 / KNOW THE EDGES</p>
+          <h2>A scheduler,<br />not an operating system.</h2>
+          <p>
+            Cadenceq selects and invokes real work callbacks, one unit at a
+            time, on one cooperative worker. The browser uses a fixed checksum
+            program; native Python exposes the callback interface. All time
+            shown is modeled, not a performance benchmark.
+          </p>
+          <a href="https://github.com/Aditya2375/cadenceq" class="hero-link"
+            >Read the implementation <span>↗</span></a
+          >
+        </div>
+        <dl>
+          <div>
+            <dt>No forced interruption</dt>
+            <dd>
+              A callback is atomic and trusted. A blocked or infinite callback
+              blocks this scheduler. SRTF only switches between returned
+              callbacks. No threads, host priorities or arbitrary-code sandbox.
+            </dd>
+          </div>
+          <div>
+            <dt>Bounded by design</dt>
+            <dd>
+              1..12 tasks, up to 7 alternating CPU/sleep bursts each, 1..64
+              units per burst, arrival 0..128, quantum 1..32 in the library.
+              Workloads need a conservative horizon of 4096 ticks or fewer.
+            </dd>
+          </div>
+          <div>
+            <dt>No real I/O or hidden work</dt>
+            <dd>
+              Sleep is a logical waiting interval, not a timer or I/O request. A
+              failing native callback consumes a tick, fails that task and is
+              never retried. Cancel acts between ticks and does not undo work.
+            </dd>
+          </div>
+          <div>
+            <dt>Local and temporary</dt>
+            <dd>
+              No uploads, network, storage, telemetry or user-supplied code in
+              this app. Reset and closing the tab lose the workload. Checksum
+              output is a deterministic work receipt, not cryptographic
+              authentication.
+            </dd>
+          </div>
+        </dl>
+      </section>
+    </main>
+    <footer>
+      <span>cadenceq / an original systems study</span
+      ><span
+        >By Aditya Kulkarni ·
+        <a href="https://github.com/Aditya2375/cadenceq">MIT source</a></span
+      >
+    </footer>
+  </body>
+</html>
